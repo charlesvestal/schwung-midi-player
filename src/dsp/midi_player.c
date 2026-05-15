@@ -435,6 +435,19 @@ static void* mp_create_instance(const char *module_dir, const char *config_json)
     p->running = 0;
     p->file_index = -1;
     rescan_files(p);
+
+    /* Auto-load files[0] so the preset browser shows a real filename on
+     * first view rather than "(no file)". Any saved patch state will run
+     * immediately after via set_param("state", ...) and override this. */
+    if (p->file_count > 0) {
+        char abs_path[512];
+        snprintf(abs_path, sizeof(abs_path), "%s/%s/%s",
+                 p->module_dir, MIDI_DIR, p->files[0]);
+        if (parse_smf(p, abs_path) == 0) {
+            p->file_index = 0;
+            rebuild_timeline(p);
+        }
+    }
     return p;
 }
 
@@ -676,7 +689,10 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
         if (p->file_count == 0) {
             return snprintf(buf, buf_len, "(no files)");
         }
-        return snprintf(buf, buf_len, "(no file)");
+        /* file_index < 0 but files exist — display matches the list_param
+         * getter (which clamps to 0) so the browser is internally
+         * consistent rather than showing "(no file)" at slot 0. */
+        return snprintf(buf, buf_len, "%s", p->files[0]);
     }
     if (strcmp(key, "state") == 0) {
         /* Chain patch persistence: bundle the user-facing settings into a
