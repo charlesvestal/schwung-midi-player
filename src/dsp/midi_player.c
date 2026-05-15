@@ -745,19 +745,26 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
          * track that actually has note-on events. Tempo/title meta tracks
          * (common as track 0 in Type 1 files) would otherwise be selectable
          * and produce silence. Original track index is preserved so the
-         * label numbering matches the .mid file's track ordering. */
-        int w = snprintf(buf, buf_len, "[{\"label\":\"All\",\"index\":-1}");
+         * label numbering matches the .mid file's track ordering.
+         *
+         * The currently-selected entry gets a leading "* " so the user can
+         * see which one is live when they re-enter the picker — items_param
+         * has no built-in current-selection styling in the shadow UI. */
+        const char *all_mark = (p->track_filter < 0) ? "* " : "";
+        int w = snprintf(buf, buf_len,
+                         "[{\"label\":\"%sAll\",\"index\":-1}", all_mark);
         for (int i = 0; i < p->ntracks && w < buf_len - 64; i++) {
             if (p->tracks[i].note_on_count == 0) continue;
+            const char *mark = (i == p->track_filter) ? "* " : "";
             const char *nm = p->tracks[i].name[0] ? p->tracks[i].name : "";
             if (nm[0]) {
                 w += snprintf(buf + w, buf_len - w,
-                              ",{\"label\":\"Track %d: %s\",\"index\":%d}",
-                              i + 1, nm, i);
+                              ",{\"label\":\"%sTrack %d: %s\",\"index\":%d}",
+                              mark, i + 1, nm, i);
             } else {
                 w += snprintf(buf + w, buf_len - w,
-                              ",{\"label\":\"Track %d\",\"index\":%d}",
-                              i + 1, i);
+                              ",{\"label\":\"%sTrack %d\",\"index\":%d}",
+                              mark, i + 1, i);
             }
         }
         w += snprintf(buf + w, buf_len - w, "]");
