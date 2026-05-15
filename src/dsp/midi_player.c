@@ -23,7 +23,11 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <ctype.h>
 #include "midi_fx_api_v1.h"
+#include "plugin_api_v1.h"
+
+static const host_api_v1_t *g_host;
 
 #define MAX_TRACKS         64
 #define MAX_EVENTS         65536   /* up to 64k events per file */
@@ -85,6 +89,49 @@ typedef struct {
     int      file_count;
     int      file_index;        /* selected index */
 } player_t;
+
+/* ---- JSON helpers (for state save/restore) ---- */
+
+static int json_get_string(const char *json, const char *key, char *out, int out_len) {
+    if (!json || !key || !out || out_len < 1) return 0;
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *pos = strstr(json, needle);
+    if (!pos) return 0;
+    const char *colon = strchr(pos + strlen(needle), ':');
+    if (!colon) return 0;
+    colon++;
+    while (*colon == ' ' || *colon == '\t') colon++;
+    if (*colon != '"') return 0;
+    colon++;
+    const char *end = strchr(colon, '"');
+    if (!end) return 0;
+    int len = (int)(end - colon);
+    if (len >= out_len) len = out_len - 1;
+    memcpy(out, colon, len);
+    out[len] = '\0';
+    return len;
+}
+
+static int json_get_int(const char *json, const char *key, int *out) {
+    if (!json || !key || !out) return 0;
+    char needle[64];
+    snprintf(needle, sizeof(needle), "\"%s\"", key);
+    const char *pos = strstr(json, needle);
+    if (!pos) return 0;
+    const char *colon = strchr(pos + strlen(needle), ':');
+    if (!colon) return 0;
+    colon++;
+    while (*colon == ' ' || *colon == '\t') colon++;
+    *out = atoi(colon);
+    return 1;
+}
+
+static const char *basename_of(const char *path) {
+    if (!path) return "";
+    const char *slash = strrchr(path, '/');
+    return slash ? slash + 1 : path;
+}
 
 /* ---- ring queue ---- */
 
@@ -514,6 +561,7 @@ static void mp_set_param(void *instance, const char *key, const char *val) {
     if (strcmp(key, "file") == 0) {
         /* val is either an absolute path or a bare filename relative to MIDI/ */
         char abs_path[512];
+        const char *base = basename_of(val);
         if (val[0] == '/') {
             snprintf(abs_path, sizeof(abs_path), "%s", val);
         } else {
@@ -523,6 +571,13 @@ static void mp_set_param(void *instance, const char *key, const char *val) {
         int prev_filter = p->track_filter;
         if (parse_smf(p, abs_path) == 0) {
             p->track_filter = prev_filter;
+            /* Sync file_index with file list so the UI's list_param
+             * displays the right entry after a path-based load. */
+            rescan_files(p);
+            p->file_index = -1;
+            for (int i = 0; i < p->file_count; i++) {
+                if (strcmp(p->files[i], base) == 0) { p->file_index = i; break; }
+            }
             rebuild_timeline(p);
         }
         return;
@@ -537,7 +592,28 @@ static void mp_set_param(void *instance, const char *key, const char *val) {
         int prev_filter = p->track_filter;
         if (parse_smf(p, abs_path) == 0) {
             p->track_filter = prev_filter;
+            p->file_index = idx;  /* parse_smf → clear_file resets it */
             rebuild_timeline(p);
+        }
+        return;
+    }
+    if (strcmp(key, "state") == 0) {
+        /* Restore from chain patch JSON: {"file":"...","track":N,"loop":"..."}
+         * Order matters — load file first so track filter / loop apply to a
+         * populated timeline. */
+        char file_buf[160];
+        int track_val;
+        char loop_str[8];
+        if (json_get_string(val, "file", file_buf, sizeof(file_buf)) > 0) {
+            mp_set_param(instance, "file", file_buf);
+        }
+        if (json_get_int(val, "track", &track_val)) {
+            char tmp[16];
+            snprintf(tmp, sizeof(tmp), "%d", track_val);
+            mp_set_param(instance, "track", tmp);
+        }
+        if (json_get_string(val, "loop", loop_str, sizeof(loop_str)) > 0) {
+            mp_set_param(instance, "loop", loop_str);
         }
         return;
     }
@@ -583,6 +659,56 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
         uint32_t bar = qn / 4;
         uint32_t beat = qn % 4;
         return snprintf(buf, buf_len, "%u.%u", bar + 1, beat + 1);
+    }
+    if (strcmp(key, "file_count") == 0) {
+        /* List browser entry point: rescan so the count is always fresh. */
+        rescan_files(p);
+        if (p->file_index >= p->file_count) p->file_index = -1;
+        return snprintf(buf, buf_len, "%d", p->file_count);
+    }
+    if (strcmp(key, "file_index") == 0) {
+        return snprintf(buf, buf_len, "%d", p->file_index < 0 ? 0 : p->file_index);
+    }
+    if (strcmp(key, "file_name_display") == 0) {
+        if (p->file_index >= 0 && p->file_index < p->file_count) {
+            return snprintf(buf, buf_len, "%s", p->files[p->file_index]);
+        }
+        if (p->file_count == 0) {
+            return snprintf(buf, buf_len, "(no files)");
+        }
+        return snprintf(buf, buf_len, "(no file)");
+    }
+    if (strcmp(key, "state") == 0) {
+        /* Chain patch persistence: bundle the user-facing settings into a
+         * single JSON blob. Filename only — index numbers shift when files
+         * are added/removed; the basename is stable. */
+        const char *fname = "";
+        if (p->file_index >= 0 && p->file_index < p->file_count) {
+            fname = p->files[p->file_index];
+        } else if (p->file_path[0]) {
+            fname = basename_of(p->file_path);
+        }
+        return snprintf(buf, buf_len,
+                        "{\"file\":\"%s\",\"track\":%d,\"loop\":\"%s\"}",
+                        fname, p->track_filter, p->loop ? "on" : "off");
+    }
+    if (strcmp(key, "error") == 0) {
+        /* Surface a clock-availability warning so the user knows why
+         * nothing's playing if MIDI Clock Out is disabled in Move
+         * settings. Empty string = no error. */
+        if (!g_host || !g_host->get_clock_status) {
+            buf[0] = '\0';
+            return 0;
+        }
+        int status = g_host->get_clock_status();
+        if (status == MOVE_CLOCK_STATUS_UNAVAILABLE) {
+            return snprintf(buf, buf_len, "Enable MIDI Clock Out in Move settings");
+        }
+        if (status == MOVE_CLOCK_STATUS_STOPPED) {
+            return snprintf(buf, buf_len, "Clock out enabled, transport stopped");
+        }
+        buf[0] = '\0';
+        return 0;
     }
     if (strcmp(key, "file_list") == 0) {
         /* Shadow UI items_param expects [{label,index}, ...]. Rescan on every
@@ -656,6 +782,6 @@ static midi_fx_api_v1_t g_api = {
 };
 
 midi_fx_api_v1_t* move_midi_fx_init(const struct host_api_v1 *host) {
-    (void)host;
+    g_host = host;
     return &g_api;
 }

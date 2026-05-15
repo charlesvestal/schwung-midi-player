@@ -15,20 +15,14 @@
       "levels": {
         "root": {
           "name": "MIDI Player",
-          "params": [
-            { "level": "file_browser", "label": "Choose File…" },
-            { "level": "track_select",  "label": "Track" },
-            { "key": "loop", "name": "Loop", "type": "enum", "options": ["off", "on"], "default": 1 }
-          ],
-          "knobs": []
-        },
-        "file_browser": {
-          "name": "MIDI File",
-          "items_param": "file_list",
-          "select_param": "file_index",
-          "children": null,
+          "list_param": "file_index",
+          "count_param": "file_count",
+          "name_param": "file_name_display",
           "knobs": [],
-          "params": []
+          "params": [
+            { "key": "loop", "name": "Loop", "type": "enum", "options": ["off", "on"], "default": 1 },
+            { "level": "track_select", "label": "Track" }
+          ]
         },
         "track_select": {
           "name": "Track",
