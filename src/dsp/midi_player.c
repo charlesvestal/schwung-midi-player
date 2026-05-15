@@ -43,6 +43,7 @@ typedef struct {
 
 typedef struct {
     char name[MAX_TRACK_NAME_LEN];
+    int  note_on_count;   /* number of note-on events; 0 = meta-only track */
 } track_info_t;
 
 typedef struct {
@@ -169,7 +170,10 @@ static void clear_file(player_t *p) {
     p->end_tick = 0;
     p->division = 480;
     p->ntracks = 0;
-    for (int i = 0; i < MAX_TRACKS; i++) p->tracks[i].name[0] = '\0';
+    for (int i = 0; i < MAX_TRACKS; i++) {
+        p->tracks[i].name[0] = '\0';
+        p->tracks[i].note_on_count = 0;
+    }
     p->playhead = 0;
     p->event_cursor = 0;
     p->running = 0;
@@ -287,6 +291,9 @@ static int parse_smf(player_t *p, const char *path) {
             ev->len    = (uint8_t)(1 + dlen);
             ev->track  = (uint8_t)track_idx;
 
+            if (type == 0x90 && d2 > 0 && track_idx < MAX_TRACKS) {
+                p->tracks[track_idx].note_on_count++;
+            }
             if (abs_tick > p->end_tick) p->end_tick = abs_tick;
         }
         track_idx++;
@@ -303,7 +310,10 @@ static int parse_smf(player_t *p, const char *path) {
     return 0;
 }
 
-/* Rebuild timeline_idx based on current track_filter. */
+/* Rebuild timeline_idx based on current track_filter, preserving the
+ * current playhead. event_cursor is positioned at the first event whose
+ * tick is at or after the playhead, so a live track change picks up
+ * playback from the same musical position rather than rewinding. */
 static void rebuild_timeline(player_t *p) {
     clear_timeline(p);
     if (p->event_count == 0) return;
@@ -316,8 +326,12 @@ static void rebuild_timeline(player_t *p) {
         }
     }
     p->timeline_count = n;
-    p->event_cursor = 0;
-    p->playhead = 0;
+
+    int cur = 0;
+    while (cur < n && p->events[p->timeline_idx[cur]].tick < p->playhead) {
+        cur++;
+    }
+    p->event_cursor = cur;
 }
 
 /* ---- file listing (for browse UI) ---- */
@@ -533,10 +547,14 @@ static void mp_set_param(void *instance, const char *key, const char *val) {
     }
     if (strcmp(key, "track") == 0) {
         /* -1 = All, 0..ntracks-1 = specific track (shadow UI items_param
-         * passes the item.index directly). */
+         * passes the item.index directly). Live switch: keep playhead,
+         * just silence any notes the previous filter was sounding so they
+         * don't hang while the new track's stream picks up. */
         int t = parse_int(val);
         if (t < 0 || t >= p->ntracks) p->track_filter = -1;
         else p->track_filter = t;
+        queue_clear(p);
+        emit_all_notes_off_ch1(p);
         rebuild_timeline(p);
         return;
     }
@@ -581,9 +599,14 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
         return w;
     }
     if (strcmp(key, "track_list_display") == 0) {
-        /* Items list for track_select level: "All" (-1), then per-track. */
+        /* Items for the track_select level: "All" (-1) followed by every
+         * track that actually has note-on events. Tempo/title meta tracks
+         * (common as track 0 in Type 1 files) would otherwise be selectable
+         * and produce silence. Original track index is preserved so the
+         * label numbering matches the .mid file's track ordering. */
         int w = snprintf(buf, buf_len, "[{\"label\":\"All\",\"index\":-1}");
         for (int i = 0; i < p->ntracks && w < buf_len - 64; i++) {
+            if (p->tracks[i].note_on_count == 0) continue;
             const char *nm = p->tracks[i].name[0] ? p->tracks[i].name : "";
             if (nm[0]) {
                 w += snprintf(buf + w, buf_len - w,
