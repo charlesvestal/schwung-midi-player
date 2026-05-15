@@ -11,7 +11,7 @@
   "assets": {
     "path": "MIDI",
     "label": "MIDI Files",
-    "extensions": [".mid", ".smf"],
+    "extensions": [".mid"],
     "description": "Upload Standard MIDI Files. Files appear in the slot's preset browser sorted alphabetically.",
     "hint": "Plenty of public-domain classical MIDIs at",
     "hint_url": "https://www.mfiles.co.uk/classical-midi.htm",

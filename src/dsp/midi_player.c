@@ -386,8 +386,7 @@ static void rebuild_timeline(player_t *p) {
 static int has_mid_ext(const char *name) {
     size_t n = strlen(name);
     if (n < 4) return 0;
-    const char *e = name + n - 4;
-    return (strcasecmp(e, ".mid") == 0 || strcasecmp(e, ".smf") == 0);
+    return strcasecmp(name + n - 4, ".mid") == 0;
 }
 
 static int cmpstr(const void *a, const void *b) {
