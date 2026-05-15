@@ -432,9 +432,18 @@ static int mp_process_midi(void *instance,
     if (!p || in_len < 1) return 0;
     uint8_t status = in_msg[0];
 
+    /* Events always flow out via mp_tick, never via mp_process_midi return.
+     * The chain's Pre-mode injection to Move's native tracks runs in two
+     * places (chain_host.c v2_on_midi vs v2_tick_midi_fx). The v2_on_midi
+     * path gates on len >= 2, which excludes single-byte system messages
+     * like 0xF8 clock — so any notes we return synchronously from a clock
+     * pulse never reach Move. The tick path has no such gate, so we route
+     * everything through there. Synth-side behavior is identical (the tick
+     * path also forwards to synth). */
     if (status == 0xF8) {
         advance_one_clock(p);
-        return queue_drain(p, out_msgs, out_lens, max_out);
+        (void)out_msgs; (void)out_lens; (void)max_out;
+        return 0;
     }
     if (status == 0xFA) {  /* Start */
         p->playhead = 0;
@@ -451,7 +460,7 @@ static int mp_process_midi(void *instance,
         p->running = 0;
         queue_clear(p);
         emit_all_notes_off_ch1(p);
-        return queue_drain(p, out_msgs, out_lens, max_out);
+        return 0;
     }
 
     /* Everything else: pass through unchanged (don't gate the synth). */
@@ -516,12 +525,11 @@ static void mp_set_param(void *instance, const char *key, const char *val) {
         return;
     }
     if (strcmp(key, "track") == 0) {
-        /* 0 = "All" in the UI; 1+N = track N-1.
-         * Also accept raw -1 for "All" and 0-based indices. */
+        /* -1 = All, 0..ntracks-1 = specific track (shadow UI items_param
+         * passes the item.index directly). */
         int t = parse_int(val);
-        if (t <= 0) p->track_filter = -1;
-        else p->track_filter = t - 1;
-        if (p->track_filter >= p->ntracks) p->track_filter = -1;
+        if (t < 0 || t >= p->ntracks) p->track_filter = -1;
+        else p->track_filter = t;
         rebuild_timeline(p);
         return;
     }
@@ -543,7 +551,7 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%s", p->loop ? "on" : "off");
     }
     if (strcmp(key, "track") == 0) {
-        return snprintf(buf, buf_len, "%d", p->track_filter < 0 ? 0 : p->track_filter + 1);
+        return snprintf(buf, buf_len, "%d", p->track_filter);
     }
     if (strcmp(key, "position") == 0) {
         uint32_t qn = p->division ? (p->playhead / p->division) : 0;
@@ -552,23 +560,32 @@ static int mp_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%u.%u", bar + 1, beat + 1);
     }
     if (strcmp(key, "file_list") == 0) {
+        /* Shadow UI items_param expects [{label,index}, ...]. Rescan on every
+         * read so newly-dropped .mid files appear without reloading the
+         * module. Cheap: one readdir of a small directory. */
+        rescan_files(p);
         int w = snprintf(buf, buf_len, "[");
-        for (int i = 0; i < p->file_count && w < buf_len - 4; i++) {
-            w += snprintf(buf + w, buf_len - w, "%s\"%s\"",
-                          i ? "," : "", p->files[i]);
+        for (int i = 0; i < p->file_count && w < buf_len - 64; i++) {
+            w += snprintf(buf + w, buf_len - w,
+                          "%s{\"label\":\"%s\",\"index\":%d}",
+                          i ? "," : "", p->files[i], i);
         }
         w += snprintf(buf + w, buf_len - w, "]");
         return w;
     }
     if (strcmp(key, "track_list_display") == 0) {
-        /* Items list for track_select level: "All", then track 1..N. */
-        int w = snprintf(buf, buf_len, "[\"All\"");
-        for (int i = 0; i < p->ntracks && w < buf_len - 8; i++) {
+        /* Items list for track_select level: "All" (-1), then per-track. */
+        int w = snprintf(buf, buf_len, "[{\"label\":\"All\",\"index\":-1}");
+        for (int i = 0; i < p->ntracks && w < buf_len - 64; i++) {
             const char *nm = p->tracks[i].name[0] ? p->tracks[i].name : "";
             if (nm[0]) {
-                w += snprintf(buf + w, buf_len - w, ",\"Track %d: %s\"", i + 1, nm);
+                w += snprintf(buf + w, buf_len - w,
+                              ",{\"label\":\"Track %d: %s\",\"index\":%d}",
+                              i + 1, nm, i);
             } else {
-                w += snprintf(buf + w, buf_len - w, ",\"Track %d\"", i + 1);
+                w += snprintf(buf + w, buf_len - w,
+                              ",{\"label\":\"Track %d\",\"index\":%d}",
+                              i + 1, i);
             }
         }
         w += snprintf(buf + w, buf_len - w, "]");
