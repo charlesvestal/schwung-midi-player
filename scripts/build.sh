@@ -30,11 +30,11 @@ ${CROSS_PREFIX}gcc -O2 -shared -fPIC \
     -DNDEBUG \
     -Isrc/dsp \
     src/dsp/midi_player.c \
-    -o build/midi-player.so
+    -o build/dsp.so
 
 cp src/module.json dist/midi-player/module.json
-cp build/midi-player.so dist/midi-player/midi-player.so
-chmod +x dist/midi-player/midi-player.so
+cp build/dsp.so dist/midi-player/dsp.so
+chmod +x dist/midi-player/dsp.so
 
 # Empty MIDI/ directory ships in the tarball so first-install via
 # Module Store (which skips install.sh) still has somewhere to drop files.
