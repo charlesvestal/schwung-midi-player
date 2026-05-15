@@ -1,0 +1,44 @@
+{
+  "id": "midi-player",
+  "name": "MIDI Player",
+  "abbrev": "MP",
+  "version": "0.1.0",
+  "description": "Play .mid files into the slot's sound generator, synced to Move's clock",
+  "author": "Charles Vestal",
+  "license": "MIT",
+  "dsp": "midi-player.so",
+  "api_version": 1,
+  "capabilities": {
+    "chainable": true,
+    "component_type": "midi_fx",
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "name": "MIDI Player",
+          "params": [
+            { "level": "file_browser", "label": "Choose File…" },
+            { "level": "track_select",  "label": "Track" },
+            { "key": "loop", "name": "Loop", "type": "enum", "options": ["off", "on"], "default": 1 }
+          ],
+          "knobs": []
+        },
+        "file_browser": {
+          "name": "MIDI File",
+          "items_param": "file_list",
+          "select_param": "file_index",
+          "children": null,
+          "knobs": [],
+          "params": []
+        },
+        "track_select": {
+          "name": "Track",
+          "items_param": "track_list_display",
+          "select_param": "track",
+          "children": null,
+          "knobs": [],
+          "params": []
+        }
+      }
+    }
+  }
+}
