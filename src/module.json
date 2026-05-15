@@ -8,6 +8,15 @@
   "license": "MIT",
   "dsp": "dsp.so",
   "api_version": 1,
+  "assets": {
+    "path": "MIDI",
+    "label": "MIDI Files",
+    "extensions": [".mid", ".smf"],
+    "description": "Upload Standard MIDI Files. Files appear in the slot's preset browser sorted alphabetically.",
+    "hint": "Plenty of public-domain classical MIDIs at",
+    "hint_url": "https://www.mfiles.co.uk/classical-midi.htm",
+    "hint_url_label": "mfiles.co.uk"
+  },
   "capabilities": {
     "chainable": true,
     "component_type": "midi_fx",
