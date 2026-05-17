@@ -2,7 +2,7 @@
   "id": "midi-player",
   "name": "MIDI Player",
   "abbrev": "MP",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Play .mid files into the slot's sound generator, synced to Move's clock",
   "author": "Charles Vestal",
   "license": "MIT",

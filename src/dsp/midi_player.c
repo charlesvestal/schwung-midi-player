@@ -318,12 +318,18 @@ static int parse_smf(player_t *p, const char *path) {
             uint8_t d1 = (dlen >= 1) ? *tp++ : 0;
             uint8_t d2 = (dlen >= 2) ? *tp++ : 0;
 
-            /* Drop preset-clobbering messages: Program Change and Bank
-             * Select CCs (CC 0 MSB, CC 32 LSB) would reset the downstream
-             * track's synth/preset every time playback starts. The user
-             * picked the synth — let them keep it. */
+            /* Drop Program Change and most CCs. The user picked the synth
+             * and dialed in its mix on the downstream track — we don't want
+             * the MIDI file overriding pan, volume, sends, etc. Allow only
+             * expressive performance CCs through:
+             *   CC 1   mod wheel
+             *   CC 64  sustain pedal
+             *   CC 66  sostenuto pedal
+             *   CC 67  soft pedal
+             *   CC 123 all notes off
+             */
             if (type == 0xC0) continue;
-            if (type == 0xB0 && (d1 == 0 || d1 == 32)) continue;
+            if (type == 0xB0 && d1 != 1 && d1 != 64 && d1 != 66 && d1 != 67 && d1 != 123) continue;
 
             if (p->event_count >= MAX_EVENTS) continue;
 
