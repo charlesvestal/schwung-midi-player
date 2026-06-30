@@ -33,7 +33,7 @@ static const host_api_v1_t *g_host;
 #define MAX_EVENTS         65536   /* up to 64k events per file */
 #define MAX_TRACK_NAME_LEN 48
 #define QUEUE_CAP          256     /* pending-event ring */
-#define MAX_FILES          64      /* file list cap for browse UI */
+#define MAX_FILES          256     /* file list cap for browse UI */
 #define MIDI_DIR           "MIDI"  /* relative to module_dir */
 
 typedef struct {
