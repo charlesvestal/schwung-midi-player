@@ -33,6 +33,7 @@ ${CROSS_PREFIX}gcc -O2 -shared -fPIC \
     -o build/dsp.so
 
 cp src/module.json dist/midi-player/module.json
+[ -f src/help.json ] && cp src/help.json dist/midi-player/help.json || true
 cp build/dsp.so dist/midi-player/dsp.so
 chmod +x dist/midi-player/dsp.so
 
